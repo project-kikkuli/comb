@@ -26,7 +26,8 @@
     "playground": "vite --open /playground.html",
     "typecheck": "tsc --noEmit",
     "comb:test": "tsx src/cli/test.ts",
-    "test:headless": "tsx --test src/core/headless-test.ts"
+    "test:headless": "tsx --test src/core/headless-test.ts",
+    "test:autotest": "tsx --test src/runtime/autotest-test.ts"
   },
   "devDependencies": {
     "@types/node": "^25.6.0",

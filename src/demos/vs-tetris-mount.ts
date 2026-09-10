@@ -560,7 +560,7 @@ export function mountVsTetris(root: HTMLElement): { dispose: () => void } {
 
   const coverageBody = document.createElement('div');
   coverageBody.style.cssText = 'font-family:var(--mono); font-size:0.7rem; color:var(--text-muted);';
-  coverageBody.textContent = 'Reads __graph to discover bounded signals and drives each through all possible states.';
+  coverageBody.textContent = 'Sweeps bounded input combinations and pulses clocks, with a 1000-step budget. Reports observed failures and state coverage; not exhaustive game verification.';
   coveragePanel.appendChild(coverageBody);
 
   const covSummary = document.createElement('div');
