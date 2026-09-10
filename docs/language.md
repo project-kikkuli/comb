@@ -568,7 +568,17 @@ No manual instrumentation needed — the `createSignal` and `createComb` primiti
 npx tsx src/cli/test.ts examples/registration.comb
 ```
 
-Instantiates the module headlessly, generates inputs, evaluates assertions, reports coverage.
+Instantiates the module headlessly, generates inputs, evaluates assertions, and
+reports observed boolean-comb values. Initialization failures count as failures,
+as do failures during the generated input sweep. The process exits with status 1
+when it observes an assertion failure or encounters a compile/runtime/argument
+error; otherwise it exits with status 0. This is a random input sweep, not a
+proof of reachable-state or temporal coverage.
+
+Use `--iterations N` (a positive integer) and `--seed N` (an integer) to reproduce
+a run. `--verbose` prints per-comb detail. The public `comb test` command accepts
+paths with spaces and can run outside the Comb checkout. Generated test modules
+are placed in a disposable temporary directory and removed after the run.
 
 ---
 
