@@ -553,29 +553,48 @@ Disposing the instance removes its reactive effects.
 
 Run the compiler-to-runtime regression suite with `npm run test:headless`.
 
-### runAutoTest() — Graph-directed coverage
+### runAutoTest() — Bounded input exploration
 
-The generic auto-test framework reads `__graph` and covers the state space automatically:
+Use a disposable headless instance to sweep finite input domains through the
+compiled runtime. Named-event-owned state can be driven directly; sequential
+outputs are observed while their root clocks are pulsed.
 
 ```javascript
-import { runAutoTest, renderAutoTestResult } from '../runtime/index.js';
+import { circuit, runAutoTest, renderAutoTestResult } from '../runtime/index.js';
+import { __test, __graph } from './MyModule.js';
 
-const result = runAutoTest(__graph, circuit, 'MyModule');
-// result.percentage      → 100 (all bounded states covered)
-// result.inputsDriven    → ['tick', 'p1_piece', ...]
-// result.clocksDriven    → ['tick']
-// result.signalCoverage  → per-signal visited states
+const instance = __test();
+try {
+  const result = runAutoTest(__graph, circuit, 'MyModule', {
+    budget: 1000,
+    clockCycles: 5,
+  });
+  console.log(result.casesExecuted, result.totalCases, result.stoppedByBudget);
+  console.log(result.violationCount, result.violations);
+  // renderAutoTestResult(result) includes failures, budget status and state coverage.
+} finally {
+  instance.dispose();
+}
 ```
 
-Algorithm:
-1. Find bounded signals (nodes with `states[]` in `__graph`)
-2. Find root signals (no incoming edges — drivable inputs)
-3. Find clocks (signals feeding posedge sensitivity blocks)
-4. Drive each root through all states via `setValue()`
-5. Tick clocks to propagate effects
-6. Track which states each signal reached
+The driver enumerates combinations without allocating the Cartesian product.
+One case assignment and each subsequent clock pulse consume one budget step.
+Defaults are 1000 steps and five pulses per clock per case. Each pulse drives
+false, true, then false, exercising both edges. Coverage records declared states
+actually observed, including intermediate clock states; out-of-domain values do
+not count toward the percentage. `unexploredInputs` identifies root inputs with
+no finite domain or runtime setter. No random values are invented for them.
 
-Works for **any** compiled module with zero module-specific logic.
+`violationCount` counts failures emitted during the sweep; `violations` retains
+the first 100 with the input assignment and step. These are direct state writes,
+not generated DOM events or a proof of reachable application states. The driver
+does not reset sequential state between cases, restore the instance afterward,
+await asynchronous handlers, or prove temporal deadlines. It does not collect
+failures from before the sweep started. A finished input sweep and 100% per-state
+coverage do not establish exhaustive behavior or transition coverage.
+
+Run `npm run test:autotest` for compiled combination, clock, real traffic-light,
+coverage-denominator, and budget regressions.
 
 ### CoverageCollector — Runtime instrumentation
 

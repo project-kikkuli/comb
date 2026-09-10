@@ -13,4 +13,4 @@ export type { Route } from './router.js';
 export { coverage, CoverageCollector } from './coverage.js';
 export type { CoverageReport, ToggleCoverage, TransitionCoverage, CrossCoverage } from './coverage.js';
 export { runAutoTest, renderAutoTestResult } from './autotest.js';
-export type { AutoTestResult } from './autotest.js';
+export type { AutoTestResult, AutoTestOptions } from './autotest.js';
