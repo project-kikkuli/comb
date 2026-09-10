@@ -143,7 +143,20 @@ Runtime invariants registered as nodes in the `__graph`. The test harness auto-e
 
 Inspired by SystemVerilog Assertions (SVA). Prior art: Quickstrom (PLDI 2022) applies LTL to web app testing externally; Comb's temporal assertions are embedded in the component model as graph nodes, with three operators: `eventually`, `always`, and `next`.
 
-The `within N` value counts **trigger evaluations** (simulation ticks), not wall-clock time. This ensures assertions behave identically regardless of clock speed.
+`within N` counts **settled simulation turns**, not wall-clock time or trigger
+reevaluations. One outer `batch` (including an empty batch) or a changed standalone
+signal write advances a turn after the reactive graph settles. Nested batches
+and internal delta cycles do not add turns. The triggering turn arms an obligation
+without consuming its deadline. `eventually` may succeed immediately or on the
+Nth subsequent turn; `always` checks the triggering state and every turn through
+that inclusive deadline. `next` checks exactly the next settled turn.
+
+Both rising and falling triggers are supported. Each edge creates its own
+obligation; later edges cannot postpone earlier deadlines. Predicates are sampled
+at settled boundaries, so intermediate states inside one batch are not temporal
+observations. No wall-clock timers are used. Use `advanceTemporalTick()` to advance
+verification with unchanged inputs; disposal or `circuit.reset()` cancels pending
+obligations and removes their observers.
 
 ```sv
 // "after request rises, grant must follow within 5 ticks"
@@ -156,8 +169,18 @@ assert temporal @(posedge bus_busy)
 
 // "after submit, show result on next tick"
 assert temporal @(posedge submitted)
-  next(showResult) within 0;
+  next(showResult);
 ```
+
+`eventually` and `always` require a positive integer `within N`. `next` needs no
+duration; `within 0` and `within 1` are accepted for compatibility and both mean
+the next settled turn. Fractions, unknown identifiers, and missing bounded
+deadlines are compile errors.
+
+`circuit.getTemporalAssertions(module?)` returns triggered, passed, failed and
+pending counts per assertion. Zero triggers means **unexercised**, not passed.
+Counts describe the current instance lifetime. Logical deadlines do not pretend
+to be wall-clock timestamps in waveform overlays.
 
 Assertion lifecycle events (armed, passed, failed) are recorded in the waveform viewer as colored overlays — green for passed, red for failed, amber for pending.
 
@@ -589,7 +612,10 @@ no finite domain or runtime setter. No random values are invented for them.
 the first 100 with the input assignment and step. These are direct state writes,
 not generated DOM events or a proof of reachable application states. The driver
 does not reset sequential state between cases, restore the instance afterward,
-await asynchronous handlers, or prove temporal deadlines. It does not collect
+await asynchronous handlers, or prove all possible event sequences. After the
+input sweep, it uses remaining step budget to advance already-triggered temporal
+obligations to their deadlines. `temporalAssertions` reports pending or unexercised
+checks explicitly; temporal counts cover the current instance lifetime. It does not collect
 failures from before the sweep started. A finished input sweep and 100% per-state
 coverage do not establish exhaustive behavior or transition coverage.
 
@@ -614,8 +640,13 @@ Instantiates the module headlessly, generates inputs, evaluates assertions, and
 reports observed boolean-comb values. Initialization failures count as failures,
 as do failures during the generated input sweep. The process exits with status 1
 when it observes an assertion failure or encounters a compile/runtime/argument
-error; otherwise it exits with status 0. This is a random input sweep, not a
-proof of reachable-state or temporal coverage.
+error. Temporal incompleteness uses status 2; otherwise it exits with status 0.
+This is a random input sweep, not a
+proof of reachable-state coverage. Triggered temporal obligations are settled for
+up to `--settle-turns N` extra turns (default 1000). Assertion failures take exit
+code 1; otherwise pending or unexercised temporal assertions take exit code 2;
+only completed, non-failing checks take exit code 0. No asynchronous service is
+mocked or awaited by advancing logical turns.
 
 Use `--iterations N` (a positive integer) and `--seed N` (an integer) to reproduce
 a run. `--verbose` prints per-comb detail. The public `comb test` command accepts

@@ -24,6 +24,16 @@ export interface GraphEdge {
   to: string;
 }
 
+export interface TemporalAssertionState {
+  nodeId: string;
+  module: string;
+  name: string;
+  triggered: number;
+  passed: number;
+  failed: number;
+  pending: number;
+}
+
 export interface GraphEvent {
   type: 'signal-change' | 'comb-recompute' | 'effect-run' | 'assertion-failed' | 'assertion-armed' | 'assertion-passed';
   nodeId: string;
@@ -58,6 +68,27 @@ export class CircuitGraph {
   private listeners = new Set<(event: GraphEvent) => void>();
   private recording = false;
   private waveforms = new Map<string, Array<{ t: number; v: any }>>();
+  private temporalAssertions = new Map<string, TemporalAssertionState>();
+
+  private temporalDisposers = new Map<string, () => void>();
+
+  registerTemporalAssertion(state: TemporalAssertionState, dispose: () => void): void {
+    this.temporalDisposers.get(state.nodeId)?.();
+    this.temporalAssertions.set(state.nodeId, state);
+    this.temporalDisposers.set(state.nodeId, dispose);
+  }
+
+  getTemporalAssertions(module?: string): TemporalAssertionState[] {
+    return [...this.temporalAssertions.values()]
+      .filter(state => module === undefined || state.module === module)
+      .map(state => ({ ...state }));
+  }
+
+  removeTemporalAssertion(nodeId: string): void {
+    this.temporalAssertions.delete(nodeId);
+    this.temporalDisposers.delete(nodeId);
+  }
+
   private staticGraphs = new Map<string, StaticGraph>(); // module → static graph
   private cachedTimestamp = 0;
   private timestampFrame = -1;
@@ -236,8 +267,7 @@ export class CircuitGraph {
     if (this.recording) {
       this.recordWaveform(assertId, { status: 'armed', start: event.timestamp, end: info.deadline });
     }
-    this.pendingListenerEvents.push(event);
-    this.scheduleListenerFlush();
+    for (const listener of this.listeners) listener(event);
   }
 
   assertionPassed(assertId: string, info: { expr: string; module: string }): void {
@@ -251,8 +281,7 @@ export class CircuitGraph {
     if (this.recording) {
       this.recordWaveform(assertId, { status: 'passed', start: event.timestamp, end: event.timestamp });
     }
-    this.pendingListenerEvents.push(event);
-    this.scheduleListenerFlush();
+    for (const listener of this.listeners) listener(event);
   }
 
   assertionFailed(assertId: string, info: { expr: string; module: string; values: Record<string, any> }): void {
@@ -439,6 +468,9 @@ export class CircuitGraph {
     this.recording = false;
     this.waveforms.clear();
     this.staticGraphs.clear();
+    for (const dispose of [...this.temporalDisposers.values()]) dispose();
+    this.temporalAssertions.clear();
+    this.temporalDisposers.clear();
     this.pendingListenerEvents = [];
     this.listenerFlushScheduled = false;
   }

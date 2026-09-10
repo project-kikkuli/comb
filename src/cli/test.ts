@@ -2,7 +2,7 @@
 
 import { compile } from '../core/compiler.js';
 import { circuit } from '../runtime/circuit.js';
-import { batch } from '../runtime/signals.js';
+import { batch, advanceTemporalTick } from '../runtime/signals.js';
 import { readFileSync, writeFileSync, mkdtempSync, rmSync } from 'fs';
 import { join, basename } from 'path';
 import { tmpdir } from 'os';
@@ -22,7 +22,7 @@ for (let i = 0; i < args.length; i++) {
   const arg = args[i];
   if (arg === '--verbose') {
     flags.verbose = 'true';
-  } else if (arg === '--iterations' || arg === '--seed') {
+  } else if (arg === '--iterations' || arg === '--seed' || arg === '--settle-turns') {
     const value = args[++i];
     if (value === undefined) {
       console.error(`Error: ${arg} requires a value`);
@@ -38,13 +38,18 @@ for (let i = 0; i < args.length; i++) {
 }
 
 if (!inputFile) {
-  console.error('Usage: comb test <file.comb> [--iterations N] [--seed N] [--verbose]');
+  console.error('Usage: comb test <file.comb> [--iterations N] [--seed N] [--settle-turns N] [--verbose]');
   process.exit(1);
 }
 
 const iterations = Number(flags.iterations ?? '1000');
 const seed = Number(flags.seed ?? String(Date.now()));
 const verbose = 'verbose' in flags;
+const settleTurns = Number(flags['settle-turns'] ?? '1000');
+if (!Number.isSafeInteger(settleTurns) || settleTurns < 0) {
+  console.error('Error: settle-turns must be a nonnegative integer');
+  process.exit(1);
+}
 if (!Number.isSafeInteger(iterations) || iterations <= 0) {
   console.error('Error: iterations must be a positive integer');
   process.exit(1);
@@ -157,6 +162,13 @@ async function run() {
     }
   }
 
+  let settled = 0;
+  while (circuit.getTemporalAssertions().some(state => state.pending > 0) && settled < settleTurns) {
+    advanceTemporalTick();
+    settled++;
+  }
+  const temporal = circuit.getTemporalAssertions();
+  const incomplete = temporal.some(state => state.pending > 0 || state.triggered === 0);
   unsub();
 
   // --- Report ---
@@ -173,6 +185,11 @@ async function run() {
       console.log(`    FAIL: ${expr}`);
     }
   }
+
+  for (const state of temporal) {
+    console.log(`  temporal ${state.name}: ${state.triggered} triggered, ${state.passed} passed, ${state.failed} failed, ${state.pending} pending${state.triggered === 0 ? ' (unexercised)' : ''}`);
+  }
+  if (incomplete) console.log('  temporal verification incomplete (exit 2): pending or unexercised assertions');
 
   // Boolean coverage: combs that only produced true/false values
   const boolCombs: string[] = [];
@@ -207,7 +224,7 @@ async function run() {
   dispose();
   console.log('');
 
-  process.exitCode = assertionFailures.length > 0 ? 1 : 0;
+  process.exitCode = assertionFailures.length > 0 ? 1 : incomplete ? 2 : 0;
 }
 
 run().catch((err) => {

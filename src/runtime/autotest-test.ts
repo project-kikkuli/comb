@@ -99,3 +99,27 @@ test('clock pulses propagate state without driving sequential outputs directly',
     assert.deepEqual(result.signalCoverage.find(entry => entry.id === 'second')!.visited, new Set(['true', 'false']));
   } finally { instance.dispose(); }
 });
+
+test('autotest completes temporal deadlines or reports budget-limited pending obligations', async () => {
+  const mod = await compiled(`module TimedSweep {
+    signal trigger: bool = false;
+    assert temporal @(trigger) eventually(false) within 2;
+  }`);
+  for (const budget of [1, 10]) {
+    circuit.reset();
+    const instance = mod.__test();
+    try {
+      const result = runAutoTest(mod.__graph, circuit, 'TimedSweep', { budget });
+      const temporal = result.temporalAssertions[0];
+      assert.equal(temporal.triggered, 1);
+      if (budget === 1) {
+        assert.equal(temporal.pending, 1);
+        assert.equal(result.stoppedByBudget, true);
+      } else {
+        assert.equal(temporal.pending, 0);
+        assert.equal(temporal.failed, 1);
+        assert.equal(result.violationCount, 1);
+      }
+    } finally { instance.dispose(); }
+  }
+});

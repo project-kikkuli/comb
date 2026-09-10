@@ -52,3 +52,22 @@ test('assertion failures during generated cases remain observable', () => {
   assert.equal(result.status, 1, result.output);
   assert.match(result.output, /FAIL:/);
 });
+
+test('CLI distinguishes temporal success, failure, pending and unexercised checks', () => {
+  const source = (property: string, duration = 2) => `module TemporalCli {
+    signal trigger: bool = false;
+    assert temporal @(posedge trigger) eventually(${property}) within ${duration};
+  }`;
+  const passing = run(source('true'));
+  assert.equal(passing.status, 0, passing.output);
+  assert.match(passing.output, /1 triggered, 1 passed, 0 failed, 0 pending/);
+  const failing = run(source('false'));
+  assert.equal(failing.status, 1, failing.output);
+  assert.match(failing.output, /1 triggered, 0 passed, 1 failed, 0 pending/);
+  const pending = run(source('false', 10), { args: ['--iterations', '2', '--seed', '1', '--settle-turns', '0'] });
+  assert.equal(pending.status, 2, pending.output);
+  assert.match(pending.output, /1 pending/);
+  const unexercised = run('module Unexercised { assert temporal @(false) eventually(true) within 2; }');
+  assert.equal(unexercised.status, 2, unexercised.output);
+  assert.match(unexercised.output, /unexercised/);
+});

@@ -76,8 +76,14 @@ always @(negedge loading) { fadeInContent(); }
 ```sv
 // SVA-inspired invariants over time
 assert temporal @(posedge submitted)
-  eventually(showSuccess || showError) within 5s;
+  eventually(showSuccess || showError) within 5;
 ```
+
+Temporal deadlines count settled simulation turns, not seconds. Rising and
+falling triggers, overlapping obligations, inclusive deadlines, and `next` are
+covered by `npm run test:temporal`. The CLI exits 1 on an observed assertion
+failure and 2 when temporal checks remain pending or unexercised. See the
+[temporal semantics and verification commands](docs/language.md#temporal-assertions).
 
 ### Planned syntax (not yet implemented)
 

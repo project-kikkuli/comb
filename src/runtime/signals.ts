@@ -33,6 +33,8 @@ interface PendingUpdate<T> {
 
 // --- Simulation Engine ---
 
+const temporalSamplers = new Set<() => void>();
+
 class SimulationEngine {
   evaluating = false;
   pendingUpdates: PendingUpdate<any>[] = [];
@@ -143,6 +145,8 @@ class SimulationEngine {
     }
 
     this.running = false;
+
+    for (const sample of [...temporalSamplers]) sample();
 
     // After quiescence: flush DOM effects
     this.flushDomEffects();
@@ -454,9 +458,8 @@ export function deferredBatch(fn: () => void): void {
 export function untrack<T>(fn: () => T): T {
   const prev = currentComputation;
   currentComputation = null;
-  const val = fn();
-  currentComputation = prev;
-  return val;
+  try { return fn(); }
+  finally { currentComputation = prev; }
 }
 
 export function createScope(): { dispose: () => void } {
@@ -671,190 +674,82 @@ export function createChangeCounter(
 
 // --- Temporal assertions ---
 
+/** Sample assertions once per settled outer batch or changed standalone write. */
 export function createTemporalAssert(
   triggerFn: () => boolean,
   operator: 'eventually' | 'always' | 'next',
   propertyFn: () => boolean,
-  meta: { name: string; module: string; duration: number },
+  meta: { name: string; module: string; duration?: number; edge?: 'posedge' | 'negedge' },
 ): void {
+  const duration = operator === 'next' ? 1 : meta.duration;
+  if (duration === undefined || !Number.isSafeInteger(duration) || duration <= 0
+    || operator === 'next' && meta.duration !== undefined && ![0, 1].includes(meta.duration)) {
+    throw new Error('Temporal duration must be a positive integer number of settled turns');
+  }
   const nodeId = circuit.registerNode({ name: meta.name, module: meta.module, type: 'effect' });
+  const state = { nodeId, module: meta.module, name: meta.name, triggered: 0, passed: 0, failed: 0, pending: 0 };
+  let previous = !!untrack(triggerFn);
+  let turn = 0;
+  let disposed = false;
+  let obligations: Array<{ deadline: number }> = [];
+  const expr = `${operator} within ${duration} settled turns`;
 
-  let previousTrigger = false;
-  let triggerInitialized = false;
-
-  // State for active assertions — tick-based counting (no setTimeout)
-  let armed = false;
-  let ticksRemaining = 0;
-  let activePropComp: Computation | null = null;
-
-  const triggerComp: Computation = {
-    execute: checkTrigger,
-    dependencies: new Set(),
-    cleanups: [],
-    disposed: false,
-    isDom: false,
-  };
-
-  if (currentScope) currentScope.track(triggerComp);
-
-  function checkTrigger(): void {
-    if (triggerComp.disposed) return;
-
-    // Clear old tracking
-    for (const dep of triggerComp.dependencies) dep.subscribers.delete(triggerComp);
-    triggerComp.dependencies.clear();
-
-    const prev = currentComputation;
-    currentComputation = triggerComp;
-    const currentTrigger = !!triggerFn();
-    currentComputation = prev;
-
-    // Detect posedge on trigger
-    if (triggerInitialized && !previousTrigger && currentTrigger) {
-      armAssertion();
-    }
-
-    // Tick-based deadline: count each trigger evaluation while armed
-    if (armed && triggerInitialized) {
-      ticksRemaining--;
-      if (ticksRemaining <= 0) {
-        // Deadline reached
-        if (operator === 'eventually') {
-          if (!propertyFn()) {
-            circuit.assertionFailed(nodeId, {
-              expr: `eventually within ${meta.duration} ticks`,
-              module: meta.module,
-              values: { property: false },
-            });
-          } else {
-            circuit.assertionPassed(nodeId, { expr: `eventually within ${meta.duration} ticks`, module: meta.module });
-          }
-          disarmAssertion();
-        } else if (operator === 'always') {
-          // Survived the full window — pass
-          circuit.assertionPassed(nodeId, { expr: `always for ${meta.duration} ticks`, module: meta.module });
-          disarmAssertion();
-        }
-      }
-    }
-
-    previousTrigger = currentTrigger;
-    triggerInitialized = true;
-    circuit.notifyEffect(nodeId);
-  }
-
-  function disarmAssertion(): void {
-    armed = false;
-    if (activePropComp) { activePropComp.disposed = true; activePropComp = null; }
-  }
-
-  function armAssertion(): void {
-    armed = true;
-    ticksRemaining = meta.duration;
-    circuit.assertionArmed(nodeId, {
-      expr: `${operator} within ${meta.duration} ticks`,
-      module: meta.module,
-      deadline: performance.now() + meta.duration * 200, // approximate for waveform display
-    });
-
-    if (operator === 'eventually') {
-      // Check immediately
-      if (propertyFn()) {
-        circuit.assertionPassed(nodeId, { expr: `eventually within ${meta.duration} ticks`, module: meta.module });
-        disarmAssertion();
-        return;
-      }
-
-      // Also monitor on each property change (early success)
-      const propComp: Computation = {
-        execute: () => {
-          if (!armed || propComp.disposed) return;
-          for (const dep of propComp.dependencies) dep.subscribers.delete(propComp);
-          propComp.dependencies.clear();
-
-          const prev = currentComputation;
-          currentComputation = propComp;
-          const result = propertyFn();
-          currentComputation = prev;
-
-          if (result) {
-            circuit.assertionPassed(nodeId, { expr: `eventually within ${meta.duration} ticks`, module: meta.module });
-            disarmAssertion();
-          }
-        },
-        dependencies: new Set(),
-        cleanups: [],
-        disposed: false,
-        isDom: false,
-      };
-      activePropComp = propComp;
-      if (currentScope) currentScope.track(propComp);
-      propComp.execute();
-
-    } else if (operator === 'always') {
-      // Property must remain true for duration ticks
-      if (!propertyFn()) {
-        circuit.assertionFailed(nodeId, {
-          expr: `always for ${meta.duration} ticks`,
-          module: meta.module,
-          values: { property: false },
-        });
-        disarmAssertion();
-        return;
-      }
-
-      // Monitor property — fail immediately if it goes false
-      const propComp: Computation = {
-        execute: () => {
-          if (!armed || propComp.disposed) return;
-          for (const dep of propComp.dependencies) dep.subscribers.delete(propComp);
-          propComp.dependencies.clear();
-
-          const prev = currentComputation;
-          currentComputation = propComp;
-          const result = propertyFn();
-          currentComputation = prev;
-
-          if (!result) {
-            circuit.assertionFailed(nodeId, {
-              expr: `always for ${meta.duration} ticks`,
-              module: meta.module,
-              values: { property: false },
-            });
-            disarmAssertion();
-          }
-        },
-        dependencies: new Set(),
-        cleanups: [],
-        disposed: false,
-        isDom: false,
-      };
-      activePropComp = propComp;
-      if (currentScope) currentScope.track(propComp);
-      propComp.execute();
-
-    } else if (operator === 'next') {
-      // Property must be true after the next evaluation
-      // Use microtask to check after current simulation quiesces
-      queueMicrotask(() => {
-        if (armed) {
-          if (!propertyFn()) {
-            circuit.assertionFailed(nodeId, {
-              expr: `next delta cycle`,
-              module: meta.module,
-              values: { property: propertyFn() },
-            });
-          } else {
-            circuit.assertionPassed(nodeId, { expr: `next delta cycle`, module: meta.module });
-          }
-          disarmAssertion();
-        }
+  function finish(passed: boolean, error?: unknown) {
+    if (passed) {
+      state.passed++;
+      circuit.assertionPassed(nodeId, { expr, module: meta.module });
+    } else {
+      state.failed++;
+      circuit.assertionFailed(nodeId, {
+        expr, module: meta.module,
+        values: error === undefined ? { property: false } : { error: String(error) },
       });
     }
   }
 
-  // Run initially to capture baseline trigger value
-  checkTrigger();
+  function sample() {
+    if (disposed) return;
+    turn++;
+    const current = !!untrack(triggerFn);
+    const triggered = meta.edge === 'negedge' ? previous && !current : !previous && current;
+    previous = current;
+    if (triggered) {
+      state.triggered++;
+      obligations.push({ deadline: turn + duration! });
+      circuit.assertionArmed(nodeId, { expr, module: meta.module });
+    }
+    const pending: typeof obligations = [];
+    for (const obligation of obligations) {
+      if (operator === 'next' && turn < obligation.deadline) {
+        pending.push(obligation);
+        continue;
+      }
+      let good: boolean;
+      try { good = !!untrack(propertyFn); }
+      catch (error) { finish(false, error); continue; }
+      if (operator === 'eventually' && good) finish(true);
+      else if (operator === 'always' && !good) finish(false);
+      else if (turn >= obligation.deadline) finish(good);
+      else pending.push(obligation);
+    }
+    obligations = pending;
+    state.pending = pending.length;
+  }
+  temporalSamplers.add(sample);
+  const dispose = () => {
+    if (disposed) return;
+    disposed = true;
+    temporalSamplers.delete(sample);
+    obligations = [];
+    circuit.removeTemporalAssertion(nodeId);
+  };
+  circuit.registerTemporalAssertion(state, dispose);
+  if (currentScope) currentScope.addCleanup(dispose);
+}
+
+/** Advance one deterministic verification turn without changing model inputs. */
+export function advanceTemporalTick(): void {
+  batch(() => {});
 }
 
 export function onMount(fn: () => void): void {
