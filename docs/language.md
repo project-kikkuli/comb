@@ -530,6 +530,29 @@ assert(t.combs.usernameValid() === true);
 t.dispose();
 ```
 
+The headless factory also installs signal-sensitive and edge-triggered
+`always` blocks. Driving a clock signal therefore executes the same state
+transitions as the mounted component. Named event handlers are available through
+`events`, with their declared arguments:
+
+```javascript
+// For: always @(increment(amount)) { count <= count + amount; }
+const t = __test();
+try {
+  t.events.increment(3);
+  assert(t.signals.count.get() === 3);
+} finally {
+  t.dispose();
+}
+```
+
+`__test()` omits the view and styles. It does not synthesize DOM event objects,
+invoke named handlers automatically, or replace external services used by a
+handler. Supply any event arguments and test doubles your module requires.
+Disposing the instance removes its reactive effects.
+
+Run the compiler-to-runtime regression suite with `npm run test:headless`.
+
 ### runAutoTest() — Graph-directed coverage
 
 The generic auto-test framework reads `__graph` and covers the state space automatically:

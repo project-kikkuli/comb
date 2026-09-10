@@ -309,15 +309,17 @@ export function generateWithSourceMap(mod: Module, graph: StaticGraph): Generate
 
   const signalNames: string[] = [];
   const combNames: string[] = [];
+  const eventNames: string[] = [];
   const testCtx = { ...ctx, indent: 1, elCount: 0, txtCount: 0, assertCount: 0 };
 
   for (const decl of mod.body) {
-    if (decl.kind === 'input' || decl.kind === 'output' || decl.kind === 'signal' || decl.kind === 'token' || decl.kind === 'comb' || decl.kind === 'cell' || decl.kind === 'constraint' || decl.kind === 'enum' || decl.kind === 'assert' || decl.kind === 'temporal_assert' || decl.kind === 'fn') {
+    if (decl.kind === 'input' || decl.kind === 'output' || decl.kind === 'signal' || decl.kind === 'token' || decl.kind === 'comb' || decl.kind === 'cell' || decl.kind === 'constraint' || decl.kind === 'enum' || decl.kind === 'assert' || decl.kind === 'temporal_assert' || decl.kind === 'fn' || decl.kind === 'always') {
       const declLines = emitDecl(decl, testCtx);
       for (const l of declLines) pushLine(l, decl.loc);
       pushLine('');
       if (decl.kind === 'signal' || decl.kind === 'token' || decl.kind === 'input' || decl.kind === 'output' || decl.kind === 'cell') signalNames.push(decl.name);
       if (decl.kind === 'comb') combNames.push(decl.name);
+      if (decl.kind === 'always' && decl.triggerKind === 'event') eventNames.push(decl.trigger.name);
     }
   }
 
@@ -327,6 +329,7 @@ export function generateWithSourceMap(mod: Module, graph: StaticGraph): Generate
   pushLine(`  return {`);
   pushLine(`    signals: { ${signalEntries} },`);
   pushLine(`    combs: { ${combEntries} },`);
+  pushLine(`    events: { ${eventNames.join(', ')} },`);
   pushLine(`    dispose: __scope.dispose,`);
   pushLine(`  };`);
   pushLine('}');
