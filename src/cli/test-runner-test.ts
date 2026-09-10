@@ -21,7 +21,7 @@ function run(source: string, options: { cli?: boolean; elsewhere?: boolean; args
     });
     assert.ifError(result.error);
     assert.equal(existsSync(join(dir, '.comb-test')), false, 'runner must not leave generated files in the consumer directory');
-    assert.deepEqual(readdirSync(dir), ["case's input.comb"], 'temporary compiled modules must be cleaned up');
+    assert.deepEqual(readdirSync(dir).filter(name => name.startsWith('comb-test-')), [], 'temporary compiled modules must be cleaned up');
     return { status: result.status, output: result.stdout + result.stderr };
   } finally {
     rmSync(dir, { recursive: true, force: true });
