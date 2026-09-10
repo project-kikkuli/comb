@@ -295,13 +295,9 @@ if (command === 'compile') {
 } else if (command === 'dev') {
   runDev();
 } else if (command === 'test') {
-  // Delegate to the existing test runner
-  const testArgs = args.slice(1).join(' ');
-  try {
-    execSync(`npx tsx src/cli/test.ts ${testArgs}`, { stdio: 'inherit' });
-  } catch {
-    process.exit(1);
-  }
+  // Keep argument boundaries and resolve the runner relative to this module.
+  process.argv = [process.argv[0], process.argv[1], ...args.slice(1)];
+  await import('./test.js');
 } else if (command === 'diff') {
   const fileA = args[1];
   const fileB = args[2];
