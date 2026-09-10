@@ -308,9 +308,16 @@ export function verify(mod: Module, moduleRegistry?: Map<string, Module>): Verif
       collectDeps(decl.property, deps, symbols, builtins, enumValues);
       decl.deps = [...deps];
 
+      const refs = new Set<string>();
+      collectAllIdentifiers(decl.trigger, refs);
+      collectAllIdentifiers(decl.property, refs);
+      for (const ref of refs) {
+        if (!isKnownIdentifier(ref)) errors.push({ message: `Undefined reference '${ref}' in temporal assertion`, line: decl.loc.line, column: decl.loc.column });
+      }
       // Validate duration
-      if (decl.duration !== undefined && decl.duration <= 0) {
-        errors.push({ message: `Temporal assertion duration must be positive, got ${decl.duration}`, line: decl.loc.line, column: decl.loc.column });
+      if (decl.operator !== 'next' && (decl.duration === undefined || !Number.isSafeInteger(decl.duration) || decl.duration <= 0)
+        || decl.operator === 'next' && decl.duration !== undefined && ![0, 1].includes(decl.duration)) {
+        errors.push({ message: `Temporal assertion requires integer turns: eventually/always need a positive within N; next accepts no duration, 0 or 1 (got ${decl.duration})`, line: decl.loc.line, column: decl.loc.column });
       }
     }
   }

@@ -1,8 +1,8 @@
 // Graph-directed bounded input sweeps through the compiled reactive runtime.
 
-import type { CircuitGraph } from './circuit.js';
+import type { CircuitGraph, TemporalAssertionState } from './circuit.js';
 import type { StaticGraph } from '../core/graph.js';
-import { batch } from './signals.js';
+import { batch, advanceTemporalTick } from './signals.js';
 
 export interface AutoTestResult {
   /** Per-signal coverage: which states were visited */
@@ -29,6 +29,7 @@ export interface AutoTestResult {
   unexploredInputs: string[];
   violations: Array<{ nodeId: string; expr: string; values: Record<string, any>; step: number; inputs: Record<string, any> }>;
   violationCount: number;
+  temporalAssertions: TemporalAssertionState[];
 }
 
 export interface AutoTestOptions {
@@ -100,6 +101,7 @@ export function runAutoTest(
     unexploredInputs: inputRoots.filter(root => !inputs.some(input => input.id === root.id)).map(root => root.id),
     violations: [],
     violationCount: 0,
+    temporalAssertions: [],
   };
   let assignment: Record<string, any> = {};
   const unsubscribe = circuit.subscribe(event => {
@@ -158,6 +160,12 @@ export function runAutoTest(
       }
       if (result.stoppedByBudget) break;
     }
+    // Complete already-triggered obligations without inventing further inputs.
+    while (circuit.getTemporalAssertions(module).some(state => state.pending > 0)) {
+      if (!consumeStep()) break;
+      advanceTemporalTick();
+    }
+    result.temporalAssertions = circuit.getTemporalAssertions(module);
   } finally {
     unsubscribe();
   }
@@ -184,7 +192,10 @@ function coveredCount(entry: AutoTestResult['signalCoverage'][number]): number {
 export function renderAutoTestResult(result: AutoTestResult): string {
   const lines: string[] = [];
   lines.push(`<div style="margin-bottom:8px">Input combinations: ${result.casesExecuted}/${result.totalCases}. ${result.stoppedByBudget ? 'Budget reached; sweep incomplete.' : 'Bounded input sweep finished.'}</div>`);
-  lines.push(`<div style="margin-bottom:8px">Observed assertion failures: ${result.violationCount}${result.violationCount > result.violations.length ? ` (first ${result.violations.length} shown)` : ''}. This is not a reachable-state or temporal proof.</div>`);
+  lines.push(`<div style="margin-bottom:8px">Observed assertion failures: ${result.violationCount}${result.violationCount > result.violations.length ? ` (first ${result.violations.length} shown)` : ''}. This is not a reachable-state proof.</div>`);
+  for (const temporal of result.temporalAssertions) {
+    lines.push(`<div>Temporal ${escapeHtml(temporal.name)}: ${temporal.triggered} triggered, ${temporal.passed} passed, ${temporal.failed} failed, ${temporal.pending} pending${temporal.triggered === 0 ? ' (unexercised)' : ''}</div>`);
+  }
   if (result.unexploredInputs.length) lines.push(`<div>Inputs without a usable finite domain: ${result.unexploredInputs.map(escapeHtml).join(', ')}</div>`);
   for (const violation of result.violations) {
     lines.push(`<div style="color:var(--warning)">Step ${violation.step}: ${escapeHtml(violation.expr)}; inputs ${escapeHtml(JSON.stringify(violation.inputs))}</div>`);

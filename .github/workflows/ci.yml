@@ -1,0 +1,31 @@
+name: Verify
+on:
+  push:
+    branches: [main]
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        node: [20, 22]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+      - run: npm ci
+      - run: npm run test:temporal
+      - name: Compiler and neighboring runtime checks
+        run: |
+          node --import tsx src/core/compiler-test.ts
+          node --import tsx src/core/codegen-test.ts
+          node --import tsx src/runtime/runtime-test.ts
+          node --import tsx src/runtime/circuit-test.ts
+          node --import tsx src/runtime/ssr-test.ts
+          node --import tsx src/runtime/router-test.ts
+      - run: npm run typecheck
+      - run: npm run build

@@ -633,7 +633,7 @@ function emitTemporalAssert(decl: TemporalAssertDecl, ctx: GenContext): string[]
     `${i}  () => ${triggerExpr},`,
     `${i}  '${decl.operator}',`,
     `${i}  () => ${propertyExpr},`,
-    `${i}  { name: '${temporalId}', module: $m${durationStr} }`,
+    `${i}  { name: '${temporalId}', module: $m${durationStr}, edge: '${edgeLabel}' }`,
     `${i});`,
   ];
 }

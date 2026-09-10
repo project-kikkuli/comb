@@ -167,7 +167,7 @@ module EdgeGen {
 
   assert(js.includes('createEdgeEffect'), 'Missing createEdgeEffect import/call');
   assert(js.includes("'posedge'"), 'Missing posedge type');
-  assert(js.includes('batch('), 'Body should be wrapped in batch');
+  assert(js.includes('deferredBatch('), 'Edge body must preserve nonblocking assignment semantics');
   assert(js.includes('setOut'), 'Should call setter');
 });
 
