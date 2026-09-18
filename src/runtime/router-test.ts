@@ -110,5 +110,18 @@ console.log('\n  Router Tests\n');
   assert(!didThrow, 'navigate() does not throw when window is undefined');
 }
 
+// Test 7: navigate() updates window.location.hash in browser
+{
+  circuit.reset();
+  window.location.hash = '';
+  const routes: Route[] = [
+    { path: '/', component: (root) => ({ dispose: () => {} }) },
+    { path: '/about', component: (root) => ({ dispose: () => {} }) },
+  ];
+  const router = createRouter(routes);
+  router.navigate('/about');
+  assert(window.location.hash === '/about', 'navigate() sets window.location.hash to /about');
+}
+
 console.log(`\n  Results: ${passed} passed, ${failed} failed\n`);
 if (failed > 0) process.exit(1);
