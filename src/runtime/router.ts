@@ -55,7 +55,9 @@ export function createRouter(routes: Route[]) {
   }
 
   function navigate(path: string) {
-    window.location.hash = path;
+    if (typeof window !== 'undefined') {
+      window.location.hash = path;
+    }
   }
 
   function link(path: string): string {

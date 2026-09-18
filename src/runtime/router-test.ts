@@ -88,5 +88,27 @@ console.log('\n  Router Tests\n');
   assert(router.link('/about') === '#/about', 'link() returns hash prefixed path');
 }
 
+// Test 6: navigate() doesn't throw in SSR (no window)
+{
+  circuit.reset();
+  const originalWindow = (globalThis as any).window;
+  delete (globalThis as any).window;
+
+  let didThrow = false;
+  try {
+    const routes: Route[] = [
+      { path: '/', component: (root) => ({ dispose: () => {} }) },
+    ];
+    const router = createRouter(routes);
+    router.navigate('/about'); // Should not throw
+  } catch (e) {
+    didThrow = true;
+  } finally {
+    (globalThis as any).window = originalWindow;
+  }
+
+  assert(!didThrow, 'navigate() does not throw when window is undefined');
+}
+
 console.log(`\n  Results: ${passed} passed, ${failed} failed\n`);
 if (failed > 0) process.exit(1);
